@@ -111,6 +111,12 @@ HardwareSink. In order:
    that passes on the Mac must pass there).
 3. **Static**: power arms in a clear volume at the rest pose. Start
    `scripts/dashboard.py` on the host; confirm stream + joint angles.
+   `run_hw` mirrors `render.state` by default (`--no-render` to disable), so
+   the dashboard stays live during every hardware step below. To watch from
+   another machine: `ssh -L 8180:localhost:8180 <host>` and open
+   `http://localhost:8180` there (the dashboard binds localhost; its engine
+   buttons drive the RENDER engine only — hardware runs stay in a terminal
+   with a hand on the e-stop).
 4. **Keyboard jog first — no headset**: `scripts/jog_arms.py --sink hw`. Single
    joint ±3°, every joint, both arms; then EE nudges. Confirm: motion direction
    matches the dashboard/sim, speed feels like the shaper cap (`rate_limit` 1.2
