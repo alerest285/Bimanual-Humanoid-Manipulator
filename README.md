@@ -346,7 +346,7 @@ uv pip install git+https://github.com/orcahand/orca_core   # ORCA hand driver
 uv pip install -e ../i2rt                              # i2rt SDK on the host
 uv run python scripts/verify_stack.py                  # gate ON the host
 uv run python scripts/dashboard.py                     # watch everything
-uv run python scripts/jog_arms.py --sink hw            # 1) jog FIRST, hand on e-stop
+uv run python scripts/jog_arms.py --sink hw [--side right]  # 1) jog FIRST, hand on e-stop
 python -m bimanual_teleop.launch.run_hw --vr replay recordings/known_good.npz  # 2) replay on metal
 python -m bimanual_teleop.launch.run_hw --vr orbit --clutch gesture            # 3) live, one hand at a time
 ```

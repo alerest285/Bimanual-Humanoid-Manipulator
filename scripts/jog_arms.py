@@ -8,6 +8,10 @@ jogging.
 
     uv run python scripts/jog_arms.py                    # render sink (sim, default)
     uv run python scripts/jog_arms.py --sink hw          # REAL arms (Linux host)
+    uv run python scripts/jog_arms.py --sink hw --side right   # single-arm bring-up
+
+`--sink hw` never touches the ORCA hands (the jog has no hand keys) and tees
+commands to the render stream so the dashboard shows the jog live.
 
 Keys:
     TAB        switch side (left/right)         1..6   select joint
@@ -54,19 +58,29 @@ class _EngineShim:
 
 
 class JogSession:
-    """Manual joint/EE jogging through the real IK — testable without a TTY."""
+    """Manual joint/EE jogging through the real IK — testable without a TTY.
 
-    def __init__(self, rig: dict, sink):
+    `sides` limits which arms are PUSHED to the sink (single-arm bring-up); the
+    IK + render shims always cover both so the dashboard scene stays complete."""
+
+    def __init__(self, rig: dict, sink, sides=SIDES):
         self.rig = rig
         self.sink = sink
+        self.sides = tuple(sides)
         self.ik = {s: ArmIK(rig, s) for s in SIDES}
         self.engine = _EngineShim(rig, self.ik)
-        self.side = "right"
+        self.side = "right" if "right" in self.sides else self.sides[0]
         self.joint = 5                      # 0-based; j6 selected by default
         self.joint_step = np.radians(3.0)
         self.ee_step = 0.015                # m per nudge
-        for s in SIDES:
+        for s in self.sides:
             self.sink.set_arm(s, self.ik[s].q)
+
+    def next_side(self) -> str:
+        """Cycle the active side among the joggable ones (TAB)."""
+        i = self.sides.index(self.side)
+        self.side = self.sides[(i + 1) % len(self.sides)]
+        return self.side
 
     # ---- actions ----------------------------------------------------------- #
     def step_joint(self, direction: int) -> np.ndarray:
@@ -115,10 +129,18 @@ class JogSession:
                 f"{self.ee_step*100:.1f}cm  {qs}")
 
 
-def _make_sink(kind: str, rig: dict):
+def _make_sink(kind: str, rig: dict, sides=SIDES):
     if kind == "hw":
-        from bimanual_teleop.hardware import HardwareSink
-        return HardwareSink(rig)
+        # The jog never commands hands (no hand keys) — arms only, and only the
+        # wired sides. Tee to the render stream so the dashboard mirrors the jog.
+        from bimanual_teleop.hardware import HardwareSink, TeeSink
+        hw = HardwareSink(rig, sides=sides, hands=False)
+        try:
+            from bimanual_teleop.render_sink import RenderSink
+            return TeeSink(hw, RenderSink(rig))
+        except Exception as e:
+            print(f"[jog] render mirror disabled ({e}) — hardware jog unaffected")
+            return hw
     from bimanual_teleop.render_sink import RenderSink
     return RenderSink(rig)
 
@@ -127,13 +149,17 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--sink", choices=["render", "hw"], default="render",
                     help="render = sim/Unity/dashboard preview; hw = REAL arms (Linux host)")
+    ap.add_argument("--side", choices=["left", "right", "both"], default="both",
+                    help="which arm(s) to drive — use a single side when only one is powered")
     args = ap.parse_args()
 
+    sides = SIDES if args.side == "both" else (args.side,)
     rig = load_rig()
-    sink = _make_sink(args.sink, rig)
-    jog = JogSession(rig, sink)
+    sink = _make_sink(args.sink, rig, sides)
+    jog = JogSession(rig, sink, sides)
     print(__doc__.split("Keys:")[1])
-    print(f"sink={args.sink}  |  watch on the dashboard: uv run python scripts/dashboard.py")
+    print(f"sink={args.sink}  sides={','.join(sides)}  |  watch on the dashboard: "
+          f"uv run python scripts/dashboard.py")
     print(jog.status_line(), flush=True)
 
     fd = sys.stdin.fileno()
@@ -150,7 +176,7 @@ def main() -> int:
             if ch in ("q", "\x1b"):
                 break
             elif ch == "\t":
-                jog.side = "left" if jog.side == "right" else "right"
+                jog.next_side()
             elif ch in "123456":
                 jog.joint = int(ch) - 1
             elif ch == "=":

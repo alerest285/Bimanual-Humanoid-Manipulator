@@ -65,6 +65,73 @@ def test_jog_ee_nudge_moves_wrist_in_world_direction(render_sink):
     assert "right" in jog.status_line().lower() or "RIGHT" in jog.status_line()
 
 
+class _Recorder:
+    """Minimal sink: records which sides get commanded."""
+
+    def __init__(self):
+        self.calls = []
+
+    def set_arm(self, side, q):
+        self.calls.append(("arm", side))
+
+    def set_hand(self, side, joints_deg):
+        self.calls.append(("hand", side))
+
+
+def test_jog_single_side_pushes_only_active_side():
+    """Single-arm bring-up: --side right must never command the unpowered arm."""
+    rig = load_rig()
+    sink = _Recorder()
+    jog = _load("jog_arms").JogSession(rig, sink, sides=("right",))
+    assert jog.side == "right"
+    assert jog.next_side() == "right"               # TAB cannot escape to a dead arm
+    jog.step_joint(+1)
+    jog.nudge_ee([0.0, 0.0, jog.ee_step])
+    jog.home()
+    assert sink.calls and {s for _, s in sink.calls} == {"right"}
+
+
+def test_hardware_sink_skips_unwired_sides_and_tee_is_hardware_first():
+    """HardwareSink drops commands for sides it was not built with (so the
+    engine/jog can keep speaking both), and TeeSink commands hardware FIRST with
+    render failures swallowed."""
+    from bimanual_teleop.hardware import HardwareSink, TeeSink
+
+    hw = HardwareSink(load_rig(), sides=(), hands=False)   # no devices: constructible anywhere
+    hw.set_arm("left", np.zeros(6))                        # unwired side: silently dropped
+    hw.set_hand("right", {"thumb_mcp": 0.0})
+    hw.close()
+
+    calls = []
+
+    class _Hw:
+        def set_arm(self, side, q):
+            calls.append(("hw_arm", side))
+
+        def set_hand(self, side, j):
+            calls.append(("hw_hand", side))
+
+        def close(self):
+            calls.append(("hw_close", None))
+
+    class _DeadRender:
+        def set_arm(self, side, q):
+            raise RuntimeError("render down")
+
+        def set_hand(self, side, j):
+            raise RuntimeError("render down")
+
+        def close(self):
+            raise RuntimeError("render down")
+
+    tee = TeeSink(_Hw(), _DeadRender())
+    tee.set_arm("right", np.zeros(6))           # render failure must not block hardware
+    tee.set_hand("right", {})
+    tee.publish(None, None, {}, 0.0, 0.0)       # no usable render publish -> no-op
+    tee.close()
+    assert calls == [("hw_arm", "right"), ("hw_hand", "right"), ("hw_close", None)]
+
+
 def test_dashboard_serves_injected_state():
     mod = _load("dashboard")
     feed = mod.StateFeed("tcp://127.0.0.1:1")               # never started — injected state

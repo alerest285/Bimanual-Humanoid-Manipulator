@@ -13,6 +13,11 @@ arms want a dedicated ~250 Hz CAN loop per side (separate process / SCHED_FIFO),
 decoupled from vision/IK via latest-value buffers — see README "Hardware day" and
 the recon architecture. This class is the correct *logic*; wrap each arm in its
 own process when you need the rate.
+
+Partial rigs: pass `sides=("right",)` / `hands=False` to drive only the devices
+that are actually powered (single-arm bring-up). Commands addressed to an
+unconfigured side are silently dropped — the engine and jog always speak both
+sides; the sink owns the knowledge of what is wired.
 """
 from __future__ import annotations
 
@@ -42,13 +47,16 @@ def arm_shaper(rig: dict, q0) -> JointCommandShaper:
 
 
 class HardwareSink:
-    def __init__(self, rig: dict):
+    def __init__(self, rig: dict, sides=SIDES, hands: bool = True):
         from .arms.yam_driver import YamArm
-        from .hands.real_driver import RealHand
-        self.arms = {s: YamArm(rig["arms"][s]["can_channel"]) for s in SIDES}
-        self.hands = {s: RealHand(model_name=rig["hands"][s]["model_name"]) for s in SIDES}
+        self.sides = tuple(sides)
+        self.arms = {s: YamArm(rig["arms"][s]["can_channel"]) for s in self.sides}
+        self.hands = {}
+        if hands:
+            from .hands.real_driver import RealHand
+            self.hands = {s: RealHand(model_name=rig["hands"][s]["model_name"]) for s in self.sides}
         self.shapers = {}
-        for s in SIDES:
+        for s in self.sides:
             try:
                 q0 = self.arms[s].state()                  # glide from the MEASURED pose
             except Exception as e:
@@ -57,9 +65,13 @@ class HardwareSink:
             self.shapers[s] = arm_shaper(rig, q0)
 
     def set_arm(self, side: str, q: np.ndarray) -> None:
+        if side not in self.arms:
+            return                                         # side not wired on this rig
         self.arms[side].command(self.shapers[side].shape(q, time.monotonic()))
 
     def set_hand(self, side: str, joints_deg: dict) -> None:
+        if side not in self.hands:
+            return
         self.hands[side].set_joint_positions(joints_deg)
 
     def close(self) -> None:
@@ -73,3 +85,41 @@ class HardwareSink:
                 a.close()
             except Exception:
                 pass
+
+
+class TeeSink:
+    """Forward commands to the hardware AND the render stream, so the dashboard
+    shows the live session while the metal moves. Hardware first — the render
+    copy is best-effort cosmetics."""
+
+    def __init__(self, hw, render):
+        self.hw = hw
+        self.render = render
+
+    def set_arm(self, side, q):
+        self.hw.set_arm(side, q)
+        try:
+            self.render.set_arm(side, q)
+        except Exception:
+            pass
+
+    def set_hand(self, side, joints_deg):
+        self.hw.set_hand(side, joints_deg)
+        try:
+            self.render.set_hand(side, joints_deg)
+        except Exception:
+            pass
+
+    def publish(self, *args, **kwargs):
+        if hasattr(self.render, "publish"):
+            try:
+                self.render.publish(*args, **kwargs)
+            except Exception:
+                pass
+
+    def close(self):
+        self.hw.close()
+        try:
+            self.render.close()
+        except Exception:
+            pass

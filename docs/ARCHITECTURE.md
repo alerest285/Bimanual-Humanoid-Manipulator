@@ -92,7 +92,7 @@ bound *how fast anything can physically move* no matter what upstream does.
 |------|---------|
 | Full hardware-free acceptance gate | `uv run python scripts/verify_stack.py` |
 | Live dashboard (status, 3D, joint angles) | `uv run python scripts/dashboard.py` → http://127.0.0.1:8180 |
-| Keyboard jog (sim→real verification) | `uv run python scripts/jog_arms.py [--sink hw]` |
+| Keyboard jog (sim→real verification) | `uv run python scripts/jog_arms.py [--sink hw] [--side right]` |
 | Record a headset session | `run_teleop --vr orbit --record recordings/s.npz` |
 | Score a recording vs the contracts | `uv run python scripts/analyze_session.py recordings/s.npz` |
 | Watchable movie (hands vs robot meshes) | `uv run --with matplotlib python scripts/render_session.py recordings/s.npz --gif out/s.gif` |
@@ -117,7 +117,9 @@ HardwareSink. In order:
    `http://localhost:8180` there (the dashboard binds localhost; its engine
    buttons drive the RENDER engine only — hardware runs stay in a terminal
    with a hand on the e-stop).
-4. **Keyboard jog first — no headset**: `scripts/jog_arms.py --sink hw`. Single
+4. **Keyboard jog first — no headset**: `scripts/jog_arms.py --sink hw`
+   (only one arm powered? add `--side right` — the sink then never opens the
+   other CAN channel, and the jog never touches hands at all). Single
    joint ±3°, every joint, both arms; then EE nudges. Confirm: motion direction
    matches the dashboard/sim, speed feels like the shaper cap (`rate_limit` 1.2
    rad/s default — slow), hardstops respected. THIS is the sim→real transfer

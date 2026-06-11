@@ -30,37 +30,6 @@ from ..vr.ingest import make_source
 from ..vr.replay import SessionRecorder
 
 
-class _TeeSink:
-    """Forward engine commands to the hardware AND the render stream, so the
-    dashboard shows the live session while the metal moves. Hardware first —
-    the render copy is best-effort cosmetics."""
-
-    def __init__(self, hw, render):
-        self.hw = hw
-        self.render = render
-
-    def set_arm(self, side, q):
-        self.hw.set_arm(side, q)
-        try:
-            self.render.set_arm(side, q)
-        except Exception:
-            pass
-
-    def set_hand(self, side, joints_deg):
-        self.hw.set_hand(side, joints_deg)
-        try:
-            self.render.set_hand(side, joints_deg)
-        except Exception:
-            pass
-
-    def close(self):
-        self.hw.close()
-        try:
-            self.render.close()
-        except Exception:
-            pass
-
-
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--vr", choices=["vuer", "orbit", "fake", "replay"], default="orbit")
@@ -94,14 +63,14 @@ def main() -> int:
     src = make_source(rig)
     clutch = RecordedClutch(src) if args.clutch == "recorded" else GestureClutch()
 
-    from ..hardware import HardwareSink
+    from ..hardware import HardwareSink, TeeSink
     sink = HardwareSink(rig)
     render = None
     if not args.no_render:
         try:
             from ..render_sink import RenderSink
             render = RenderSink(rig)
-            sink = _TeeSink(sink, render)
+            sink = TeeSink(sink, render)
             print(f"[hw] render.state mirrored for the dashboard "
                   f"({rig['vr'].get('unity_json_endpoint', 'tcp://127.0.0.1:8102')})")
         except Exception as e:
