@@ -525,6 +525,10 @@ class EngineManager:
         busy = []
         for p in cls.ENGINE_PORTS:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            # Match the engine's bind semantics (zmq and the render sink both set
+            # SO_REUSEADDR): TIME_WAIT leftovers from a just-stopped engine must
+            # not read as busy — only a live listener should.
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
                 s.bind(("127.0.0.1", p))
             except OSError:
